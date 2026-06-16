@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# Local experiment data and outputs
+ER/KG4ER/data/*/
+!ER/KG4ER/data/README.md
+!ER/KG4ER/data/*.py
+ER/KG4ER/runs/
+ER/KG4ER/codes/models/
+
+# Other project folders not required for ER training/testing
+ER/pykt-toolkit-main/
+KT/
+EL/
+
+# Documents not intended for this GitHub repo
+ER/docs/
+*.pdf
+
+# Model/data artifacts
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
+*.pkl
+*.zip
+*.rar
+*.7z
+*.xlsx
+*.log
+
+# Large raw/processed tables
+*.csv
+*.tsv
+*.txt
+!README.md
+!ER/KG4ER/codes/run.sh
