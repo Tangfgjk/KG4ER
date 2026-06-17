@@ -71,6 +71,8 @@ python run_dataset_experiments.py `
 
 Outputs are saved under `ER/KG4ER/runs/<dataset>/<dataset>_full_<timestamp>/`.
 
+The one-click runner includes `ConvE_full`, ConvE ablations, `TransE`, `TransE-adv`, `RotatE`, `DistMult`, `ComplEx`, and the traditional baselines.
+
 ## Notes
 
 - `ER/docs/` and PDF documents are kept local and are not part of this repository.

@@ -12,7 +12,7 @@ from experiment_utils import update_timing, write_json
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Score ER recommendations with trained KGE embeddings.")
-    parser.add_argument("--model", required=True, choices=["TransE", "RotatE", "DistMult", "ComplEx"])
+    parser.add_argument("--model", required=True, choices=["TransE", "TransE-adv", "RotatE", "DistMult", "ComplEx"])
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--embedding-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -57,7 +57,7 @@ def load_test_relations(path):
 
 
 def transe(head, relation, tail, gamma):
-    return gamma - np.linalg.norm((head + relation) - tail, ord=1)
+    return gamma - np.linalg.norm((head + relation) - tail, ord=2)
 
 
 def rotate(head, relation, tail, gamma):
@@ -87,6 +87,7 @@ def complex_score(head, relation, tail, gamma):
 def score_fn(model_name):
     return {
         "TransE": transe,
+        "TransE-adv": transe,
         "RotatE": rotate,
         "DistMult": distmult,
         "ComplEx": complex_score,
@@ -112,7 +113,22 @@ def score_exercise_candidate(
     cognitive_items,
     exfr_items,
     gamma,
+    model_name=None,
+    mlkc_count=None,
 ):
+    if model_name in {"TransE", "TransE-adv"}:
+        return score_transe_er_candidate(
+            entity_embedding,
+            relation_embedding,
+            entity2id,
+            relation2id,
+            exercise,
+            cognitive_items,
+            exfr_items,
+            gamma,
+            mlkc_count,
+        )
+
     cognitive_scores = [
         score_triple(
             scorer,
@@ -141,6 +157,43 @@ def score_exercise_candidate(
             exercise,
             forget_relation,
             exercise,
+            gamma,
+        )
+    return float(cognitive_score + forget_score)
+
+
+def score_transe_er_candidate(
+    entity_embedding,
+    relation_embedding,
+    entity2id,
+    relation2id,
+    exercise,
+    cognitive_items,
+    exfr_items,
+    gamma,
+    mlkc_count=None,
+):
+    rec_relation = relation_embedding[relation2id["rec"]]
+    exercise_embedding = entity_embedding[entity2id[exercise]]
+    cognitive_scores = [
+        transe(
+            entity_embedding[entity2id[kc]] + relation_embedding[relation2id[relation]],
+            rec_relation,
+            exercise_embedding,
+            gamma,
+        )
+        for kc, relation in cognitive_items
+    ]
+    denominator = mlkc_count or max(1, len(cognitive_scores))
+    cognitive_score = sum(cognitive_scores) / max(1, denominator)
+
+    forget_score = 0.0
+    forget_relation = exfr_items.get(exercise)
+    if forget_relation:
+        forget_score = transe(
+            exercise_embedding + relation_embedding[relation2id[forget_relation]],
+            rec_relation,
+            exercise_embedding,
             gamma,
         )
     return float(cognitive_score + forget_score)
@@ -180,6 +233,8 @@ def main():
                     cognitive_items,
                     exfr_items,
                     args.gamma,
+                    model_name=args.model,
+                    mlkc_count=len(mlkc_items),
                 )
             )
         uid_ex_scores.append((uid, scores))

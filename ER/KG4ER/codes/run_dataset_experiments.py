@@ -45,10 +45,14 @@ CONVE_EXPERIMENTS = {
 }
 
 KGE_EXPERIMENTS = {
-    "TransE": [],
-    "RotatE": ["--double_entity_embedding"],
-    "DistMult": [],
-    "ComplEx": ["--double_entity_embedding", "--double_relation_embedding"],
+    "TransE": {"model": "TransE", "args": []},
+    "TransE-adv": {
+        "model": "TransE",
+        "args": ["--negative_adversarial_sampling", "--adversarial_temperature", "1.0"],
+    },
+    "RotatE": {"model": "RotatE", "args": ["--double_entity_embedding"]},
+    "DistMult": {"model": "DistMult", "args": []},
+    "ComplEx": {"model": "ComplEx", "args": ["--double_entity_embedding", "--double_relation_embedding"]},
 }
 
 TRADITIONAL_BASELINES = ["EB-CF", "SB-CF", "CBF", "KCP-ER"]
@@ -300,6 +304,7 @@ def train_kge(args, batch_dir, data_dir, eval_data_dir, experiment_name, seed, u
         return
     run_dir.mkdir(parents=True, exist_ok=True)
     update_task(batch_dir, task_id, "running", run_dir=str(run_dir), seed=seed, experiment=experiment_name)
+    experiment_config = KGE_EXPERIMENTS[experiment_name]
     command = [
         sys.executable,
         "run.py",
@@ -309,7 +314,7 @@ def train_kge(args, batch_dir, data_dir, eval_data_dir, experiment_name, seed, u
         "--dataset_name",
         args.dataset,
         "--model",
-        experiment_name,
+        experiment_config["model"],
         "--save_path",
         str(run_dir),
         "--max_steps",
@@ -325,7 +330,7 @@ def train_kge(args, batch_dir, data_dir, eval_data_dir, experiment_name, seed, u
         "--seed",
         str(seed),
     ]
-    command.extend(KGE_EXPERIMENTS[experiment_name])
+    command.extend(experiment_config["args"])
     if use_cuda:
         command.append("--cuda")
     if args.resume and (run_dir / "checkpoint").exists():
