@@ -9,10 +9,13 @@ from pathlib import Path
 PUBLIC_DATASETS = {"assist2009", "algebra2005", "statics2011"}
 DATASET_FOLDERS = {
     "assist2009": "assist2009",
+    "assist2009-sub": "assist2009-sub",
     "algebra2005": "algebra2005",
     "statics2011": "statics2011",
     "xes3g5m-sub": "XES3G5M-sub",
     "XES3G5M-sub": "XES3G5M-sub",
+    "XES3G5M-sub-small": "XES3G5M-sub-small",
+    "xes3g5m-sub-small": "XES3G5M-sub-small",
 }
 
 

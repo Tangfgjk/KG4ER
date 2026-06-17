@@ -20,8 +20,10 @@ DATASET_DIRS = {
     "Eedi": KG4ER_ROOT / "data" / "Eedi",
     "algebra2005": KG4ER_ROOT / "data" / "algebra2005" / "prepared_for_kt",
     "assist2009": KG4ER_ROOT / "data" / "assist2009" / "prepared_for_kt",
+    "assist2009-sub": KG4ER_ROOT / "data" / "assist2009-sub" / "prepared_for_kt",
     "statics2011": KG4ER_ROOT / "data" / "statics2011" / "prepared_for_kt",
     "XES3G5M-sub": KG4ER_ROOT / "data" / "XES3G5M-sub" / "prepared_for_kt",
+    "XES3G5M-sub-small": KG4ER_ROOT / "data" / "XES3G5M-sub-small" / "prepared_for_kt",
 }
 
 REQUIRED_DATA_FILES = [
