@@ -20,7 +20,7 @@ class Args:
     def __init__(self, parsed_args=None):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.bs = 1024
-        self.epochs = 5 # 10
+        self.epochs = 10
         self.learning_rate = 0.001
         self.cuda = True
         self.data_path = os.path.abspath(os.path.join(base_dir, '..', 'data', 'Eedi'))
@@ -28,11 +28,12 @@ class Args:
 
         self.embedding_dim = 200
         self.embedding_shape1 = 20
-        self.input_drop = 0.1  # 0.2
-        self.hidden_drop = 0.1  #0.2
-        self.feat_drop = 0.1  #0.3
+        self.input_drop = 0.2
+        self.hidden_drop = 0.2
+        self.feat_drop = 0.3
         self.hidden_size = 9728  # fc隐藏层大小
         self.use_bias = True
+        self.include_test_triples = False
         # self.data_path = '../data/Eedi'
         self.seed = None
         self.deterministic = False
@@ -55,7 +56,7 @@ class Args:
         self.metrics_file = self.metrics_file or os.path.join(self.save_path, "metrics.json")
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Train ConvE for ER recommendation triples.")
     parser.add_argument("--bs", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
@@ -77,7 +78,21 @@ def parse_args():
     parser.add_argument("--feat_drop", type=float, default=None)
     parser.add_argument("--hidden_size", type=int, default=None)
     parser.add_argument("--resume", action="store_true", help="Resume ConvE training from last.pt in save_path.")
-    return parser.parse_args()
+    parser.add_argument(
+        "--include-test-triples",
+        "--include_test_triples",
+        dest="include_test_triples",
+        action="store_true",
+        help="Also train ConvE on test_triples.txt. Disabled by default to match the paper-style protocol.",
+    )
+    return parser.parse_args(argv)
+
+
+def training_triple_files(args):
+    files = ["triples.txt"]
+    if getattr(args, "include_test_triples", False):
+        files.append("test_triples.txt")
+    return files
 
 
 def read_triple(file_path, entity2id, relation2id):
@@ -289,12 +304,12 @@ def main():
     nentity = len(entity2id)
     nrelation = len(relation2id)
 
-    triples = read_triple(os.path.join(args.data_path, 'triples.txt'), entity2id, relation2id)
+    train_files = training_triple_files(args)
+    triples = []
+    for file_name in train_files:
+        triples.extend(read_triple(os.path.join(args.data_path, file_name), entity2id, relation2id))
     dataset = MyDataset(triples, entity2id, relation2id, args.cuda)
     dataloader = DataLoader(dataset, batch_size=args.bs, shuffle=True)
-    triples_test = read_triple(os.path.join(args.data_path, 'test_triples.txt'), entity2id, relation2id)
-    dataset_test = MyDataset(triples_test, entity2id, relation2id, args.cuda)
-    dataloader_test = DataLoader(dataset_test, batch_size=args.bs, shuffle=True)
 
     model = ConvE(args, nentity, nrelation)
     if args.cuda:
@@ -320,17 +335,16 @@ def main():
     logging.info(f'epochs = {args.epochs}')
     logging.info(f'learning_rate = {args.learning_rate}')
     logging.info(f'seed = {args.seed}')
+    logging.info(f'input_drop = {args.input_drop}')
+    logging.info(f'hidden_drop = {args.hidden_drop}')
+    logging.info(f'feat_drop = {args.feat_drop}')
+    logging.info(f'training_triple_files = {train_files}')
+    logging.info(f'train_triples = {len(triples)}')
 
     training_start = time.perf_counter()
     for epoch in range(start_epoch, args.epochs):
         epoch_loss = 0
         for h, r, t in tqdm(dataloader):
-            label = torch.ones(len(h), device=h.device)
-            loss = train_step(model, h, r, t, label, optimizer, args.cuda)
-            epoch_loss += loss
-
-        # 学一下recommend以外的部分
-        for h, r, t in tqdm(dataloader_test):
             label = torch.ones(len(h), device=h.device)
             loss = train_step(model, h, r, t, label, optimizer, args.cuda)
             epoch_loss += loss
@@ -356,6 +370,12 @@ def main():
             "best_epoch": best_epoch,
             "final_epoch": args.epochs,
             "training_seconds": round(training_seconds, 6),
+            "input_drop": args.input_drop,
+            "hidden_drop": args.hidden_drop,
+            "feat_drop": args.feat_drop,
+            "training_triple_files": train_files,
+            "train_triples": len(triples),
+            "include_test_triples": args.include_test_triples,
         },
         args.metrics_file,
     )

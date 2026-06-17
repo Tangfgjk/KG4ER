@@ -58,7 +58,7 @@ KGE_EXPERIMENTS = {
 TRADITIONAL_BASELINES = ["EB-CF", "SB-CF", "CBF", "KCP-ER"]
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run all ER experiments for one dataset with resume support.")
     parser.add_argument("--dataset", required=True, choices=sorted(DATASET_DIRS))
     parser.add_argument("--run-root", type=Path, default=KG4ER_ROOT / "runs")
@@ -66,9 +66,17 @@ def parse_args():
     parser.add_argument("--resume", action="store_true", help="Resume latest run for this dataset unless --run-id is given.")
     parser.add_argument("--seeds", default="2024,2025,2026,2027,2028")
     parser.add_argument("--cuda", default="auto", choices=["auto", "true", "false"])
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--conve-batch-size", type=int, default=1024)
     parser.add_argument("--conve-learning-rate", type=float, default=0.001)
+    parser.add_argument("--conve-input-drop", type=float, default=0.2)
+    parser.add_argument("--conve-hidden-drop", type=float, default=0.2)
+    parser.add_argument("--conve-feat-drop", type=float, default=0.3)
+    parser.add_argument(
+        "--conve-include-test-triples",
+        action="store_true",
+        help="Also train ConvE on test_triples.txt. Disabled by default to match the paper-style protocol.",
+    )
     parser.add_argument("--kge-max-steps", type=int, default=10000)
     parser.add_argument("--kge-batch-size", type=int, default=1024)
     parser.add_argument("--negative-sample-size", type=int, default=256)
@@ -79,7 +87,7 @@ def parse_args():
     parser.add_argument("--target-mastery", type=float, default=0.8)
     parser.add_argument("--models", default="all", help="all or comma-separated experiment names.")
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def timestamp():
@@ -247,11 +255,19 @@ def train_conve(args, batch_dir, data_dir, eval_data_dir, experiment_name, seed,
         str(args.conve_batch_size),
         "--learning_rate",
         str(args.conve_learning_rate),
+        "--input_drop",
+        str(args.conve_input_drop),
+        "--hidden_drop",
+        str(args.conve_hidden_drop),
+        "--feat_drop",
+        str(args.conve_feat_drop),
         "--cuda",
         "true" if use_cuda else "false",
         "--seed",
         str(seed),
     ]
+    if args.conve_include_test_triples:
+        command.append("--include-test-triples")
     if args.resume and (run_dir / "last.pt").exists():
         command.append("--resume")
     rc = run_command(command, CODE_DIR, run_dir / "train.log", args.dry_run)
@@ -539,6 +555,15 @@ def write_manifest(args, batch_dir, data_dir, use_cuda, seeds):
         "cuda_enabled": use_cuda,
         "seeds": seeds,
         "conve_experiments": list(CONVE_EXPERIMENTS.keys()),
+        "conve_training": {
+            "epochs": args.epochs,
+            "batch_size": args.conve_batch_size,
+            "learning_rate": args.conve_learning_rate,
+            "input_drop": args.conve_input_drop,
+            "hidden_drop": args.conve_hidden_drop,
+            "feat_drop": args.conve_feat_drop,
+            "include_test_triples": args.conve_include_test_triples,
+        },
         "kge_experiments": list(KGE_EXPERIMENTS.keys()),
         "traditional_baselines": TRADITIONAL_BASELINES,
         "command": " ".join(sys.argv),
