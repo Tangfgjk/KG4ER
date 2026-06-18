@@ -74,15 +74,26 @@ def parse_args(argv=None):
     parser.add_argument("--conve-input-drop", type=float, default=0.2)
     parser.add_argument("--conve-hidden-drop", type=float, default=0.2)
     parser.add_argument("--conve-feat-drop", type=float, default=0.3)
+    parser.add_argument("--conve-negative-ratio", type=int, default=5)
     parser.add_argument(
         "--conve-include-test-triples",
+        dest="conve_include_test_triples",
         action="store_true",
-        help="Also train ConvE on test_triples.txt. Disabled by default to match the paper-style protocol.",
+        default=True,
+        help="Train ConvE on both triples.txt and test_triples.txt. Enabled by default to match the original code.",
     )
-    parser.add_argument("--kge-max-steps", type=int, default=10000)
+    parser.add_argument(
+        "--conve-exclude-test-triples",
+        dest="conve_include_test_triples",
+        action="store_false",
+        help="Train ConvE only on triples.txt for diagnostic train/test separation runs.",
+    )
+    parser.add_argument("--kge-max-steps", type=int, default=30000)
     parser.add_argument("--kge-batch-size", type=int, default=1024)
     parser.add_argument("--negative-sample-size", type=int, default=256)
-    parser.add_argument("--kge-learning-rate", type=float, default=0.0001)
+    parser.add_argument("--kge-hidden-dim", type=int, default=1000)
+    parser.add_argument("--kge-gamma", type=float, default=12.0)
+    parser.add_argument("--kge-learning-rate", type=float, default=0.001)
     parser.add_argument("--cpu-num", type=int, default=10)
     parser.add_argument("--top-ks", default="10,15,20,30,50,75,100")
     parser.add_argument("--ep-top-k", type=int, default=10)
@@ -263,6 +274,8 @@ def train_conve(args, batch_dir, data_dir, eval_data_dir, experiment_name, seed,
         str(args.conve_hidden_drop),
         "--feat_drop",
         str(args.conve_feat_drop),
+        "--negative-ratio",
+        str(args.conve_negative_ratio),
         "--cuda",
         "true" if use_cuda else "false",
         "--seed",
@@ -270,6 +283,8 @@ def train_conve(args, batch_dir, data_dir, eval_data_dir, experiment_name, seed,
     ]
     if args.conve_include_test_triples:
         command.append("--include-test-triples")
+    else:
+        command.append("--exclude-test-triples")
     if args.resume and (run_dir / "last.pt").exists():
         command.append("--resume")
     rc = run_command(command, CODE_DIR, run_dir / "train.log", args.dry_run)
@@ -341,6 +356,10 @@ def train_kge(args, batch_dir, data_dir, eval_data_dir, experiment_name, seed, u
         str(args.kge_batch_size),
         "--negative_sample_size",
         str(args.negative_sample_size),
+        "--hidden_dim",
+        str(args.kge_hidden_dim),
+        "--gamma",
+        str(args.kge_gamma),
         "--learning_rate",
         str(args.kge_learning_rate),
         "--cpu_num",
@@ -564,9 +583,18 @@ def write_manifest(args, batch_dir, data_dir, use_cuda, seeds):
             "input_drop": args.conve_input_drop,
             "hidden_drop": args.conve_hidden_drop,
             "feat_drop": args.conve_feat_drop,
+            "negative_ratio": args.conve_negative_ratio,
             "include_test_triples": args.conve_include_test_triples,
         },
         "kge_experiments": list(KGE_EXPERIMENTS.keys()),
+        "kge_training": {
+            "max_steps": args.kge_max_steps,
+            "batch_size": args.kge_batch_size,
+            "negative_sample_size": args.negative_sample_size,
+            "hidden_dim": args.kge_hidden_dim,
+            "gamma": args.kge_gamma,
+            "learning_rate": args.kge_learning_rate,
+        },
         "traditional_baselines": TRADITIONAL_BASELINES,
         "command": " ".join(sys.argv),
     }

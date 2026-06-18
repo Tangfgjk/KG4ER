@@ -33,7 +33,7 @@ class Args:
         self.feat_drop = 0.3
         self.hidden_size = 9728  # fc隐藏层大小
         self.use_bias = True
-        self.include_test_triples = False
+        self.include_test_triples = True
         # self.data_path = '../data/Eedi'
         self.seed = None
         self.deterministic = False
@@ -42,6 +42,7 @@ class Args:
         self.run_id = None
         self.timing_file = None
         self.metrics_file = None
+        self.negative_ratio = 5
 
         if parsed_args is not None:
             for key, value in vars(parsed_args).items():
@@ -52,6 +53,7 @@ class Args:
             self.save_path = str(
                 resolve_run_dir(self.run_root, self.dataset_name, "ConvE", run_id=self.run_id, seed=self.seed)
             )
+        self.negative_ratio = max(0, int(self.negative_ratio))
         self.timing_file = self.timing_file or os.path.join(self.save_path, "timing.json")
         self.metrics_file = self.metrics_file or os.path.join(self.save_path, "metrics.json")
 
@@ -77,13 +79,22 @@ def parse_args(argv=None):
     parser.add_argument("--hidden_drop", type=float, default=None)
     parser.add_argument("--feat_drop", type=float, default=None)
     parser.add_argument("--hidden_size", type=int, default=None)
+    parser.add_argument("--negative-ratio", "--negative_ratio", dest="negative_ratio", type=int, default=None)
     parser.add_argument("--resume", action="store_true", help="Resume ConvE training from last.pt in save_path.")
     parser.add_argument(
         "--include-test-triples",
         "--include_test_triples",
         dest="include_test_triples",
         action="store_true",
-        help="Also train ConvE on test_triples.txt. Disabled by default to match the paper-style protocol.",
+        default=None,
+        help="Also train ConvE on test_triples.txt. Enabled by default to match the original code.",
+    )
+    parser.add_argument(
+        "--exclude-test-triples",
+        "--exclude_test_triples",
+        dest="include_test_triples",
+        action="store_false",
+        help="Train ConvE only on triples.txt for diagnostic train/test separation runs.",
     )
     return parser.parse_args(argv)
 
@@ -104,21 +115,104 @@ def read_triple(file_path, entity2id, relation2id):
     return triples
 
 
+def entity_type(entity_name):
+    if entity_name.startswith("uid"):
+        return "uid"
+    if entity_name.startswith("ex"):
+        return "ex"
+    if entity_name.startswith("kc"):
+        return "kc"
+    return None
+
+
+def relation_tail_type(relation_name):
+    if relation_name == "rec":
+        return "ex"
+    if relation_name.startswith(("mlkc", "pkc", "exfr")):
+        return "uid"
+    return None
+
+
+def build_tail_candidates(entity2id):
+    candidates = {"uid": [], "ex": [], "kc": []}
+    for entity_name, entity_id in entity2id.items():
+        kind = entity_type(entity_name)
+        if kind in candidates:
+            candidates[kind].append(entity_id)
+    return {key: sorted(value) for key, value in candidates.items()}
+
+
+def build_positive_tails_by_hr(triples):
+    positive_tails = {}
+    for h, r, t in triples:
+        positive_tails.setdefault((h, r), set()).add(t)
+    return positive_tails
+
+
 class MyDataset(Dataset):
-    def __init__(self, triples, entity2id, relation2id, cuda=True):
+    def __init__(
+        self,
+        triples,
+        entity2id,
+        relation2id,
+        cuda=True,
+        negative_ratio=0,
+        relation_id_to_name=None,
+        entity_id_to_name=None,
+        tail_candidates_by_type=None,
+        positive_tails_by_hr=None,
+        seed=None,
+    ):
         self.triples = triples
         self.entity2id = entity2id
         self.relation2id = relation2id
         self.cuda = cuda
+        self.negative_ratio = max(0, int(negative_ratio or 0))
+        self.relation_id_to_name = relation_id_to_name or {}
+        self.entity_id_to_name = entity_id_to_name or {}
+        self.tail_candidates_by_type = tail_candidates_by_type or {}
+        self.positive_tails_by_hr = positive_tails_by_hr or {}
+        self.seed = 0 if seed is None else int(seed)
 
     def __len__(self):
-        return len(self.triples)
+        return len(self.triples) * (1 + self.negative_ratio)
+
+    def sample_negative_tail(self, h, r, positive_tail, sample_idx):
+        relation_name = self.relation_id_to_name.get(r, "")
+        tail_type = relation_tail_type(relation_name) or entity_type(self.entity_id_to_name.get(positive_tail, ""))
+        candidates = self.tail_candidates_by_type.get(tail_type, [])
+        if not candidates:
+            raise ValueError(f"No type-compatible tail candidates for relation {relation_name}")
+
+        blocked = self.positive_tails_by_hr.get((h, r), set())
+        rng = random.Random(self.seed + sample_idx * 1000003)
+        for _ in range(100):
+            candidate = candidates[rng.randrange(len(candidates))]
+            if candidate not in blocked:
+                return candidate
+
+        eligible = [candidate for candidate in candidates if candidate not in blocked]
+        if not eligible:
+            raise ValueError(f"No filtered negative tail available for relation {relation_name}")
+        return eligible[rng.randrange(len(eligible))]
 
     def __getitem__(self, idx):
-        h, r, t = self.triples[idx]
+        group_size = 1 + self.negative_ratio
+        triple_idx = idx // group_size
+        offset = idx % group_size
+        h, r, t = self.triples[triple_idx]
+        label = 1.0
+        if offset != 0:
+            t = self.sample_negative_tail(h, r, t, idx)
+            label = 0.0
         if self.cuda:
-            return torch.tensor(h).cuda(), torch.tensor(r).cuda(), torch.tensor(t).cuda()
-        return torch.tensor(h), torch.tensor(r), torch.tensor(t)
+            return (
+                torch.tensor(h).cuda(),
+                torch.tensor(r).cuda(),
+                torch.tensor(t).cuda(),
+                torch.tensor(label, dtype=torch.float32).cuda(),
+            )
+        return torch.tensor(h), torch.tensor(r), torch.tensor(t), torch.tensor(label, dtype=torch.float32)
 
 
 # 定义模型（以ConvE为例）
@@ -203,10 +297,8 @@ def train_step(model, h, r, t, label, optimizer, cuda=True):
     optimizer.zero_grad()
     pred = model.forward(h, r)
     pred_t = torch.gather(pred, 1, t.unsqueeze(1))  # 选取t的预测值
-    if cuda:
-        label = label.cuda()
-        pred_t = pred_t.cuda()
-    loss = F.binary_cross_entropy(pred_t.squeeze(), label.float())
+    label = label.to(pred_t.device).float().view(-1)
+    loss = F.binary_cross_entropy(pred_t.view(-1), label)
     loss.backward()
     optimizer.step()
     return loss.item()
@@ -238,21 +330,26 @@ def save_model(model, optimizer, args, epoch=None, loss=None, checkpoint_name="l
     torch_save_file(payload, os.path.join(args.save_path, checkpoint_name))
     if save_legacy and checkpoint_name != "checkpoint":
         torch_save_file(payload, os.path.join(args.save_path, "checkpoint"))
-    torch_save_file(model, os.path.join(args.save_path, 'DTransformer.pth'))
-    torch_save_file(model, os.path.join(args.save_path, 'model.pth'))
+    is_best = checkpoint_name == "best.pt"
+    if is_best:
+        torch_save_file(model, os.path.join(args.save_path, "best_model.pth"))
+    else:
+        torch_save_file(model, os.path.join(args.save_path, 'DTransformer.pth'))
+        torch_save_file(model, os.path.join(args.save_path, 'model.pth'))
 
     with open(os.path.join(args.save_path, "config.json"), "w", encoding="utf-8") as fp:
         json.dump(vars(args), fp, ensure_ascii=False, indent=2)
 
+    prefix = "best_" if is_best else ""
     entity_embedding = model.emb_e.weight.data.detach().cpu().numpy()
     np.save(
-        os.path.join(args.save_path, 'entity_embedding'),
+        os.path.join(args.save_path, f'{prefix}entity_embedding'),
         entity_embedding
     )
 
     relation_embedding = model.emb_rel.weight.data.detach().cpu().numpy()
     np.save(
-        os.path.join(args.save_path, 'relation_embedding'),
+        os.path.join(args.save_path, f'{prefix}relation_embedding'),
         relation_embedding
     )
 
@@ -305,11 +402,36 @@ def main():
     nrelation = len(relation2id)
 
     train_files = training_triple_files(args)
-    triples = []
+    entity_id_to_name = {entity_id: entity_name for entity_name, entity_id in entity2id.items()}
+    relation_id_to_name = {relation_id: relation_name for relation_name, relation_id in relation2id.items()}
+    tail_candidates_by_type = build_tail_candidates(entity2id)
+    triple_groups = []
+    positive_triples = []
+    total_triples = 0
     for file_name in train_files:
-        triples.extend(read_triple(os.path.join(args.data_path, file_name), entity2id, relation2id))
-    dataset = MyDataset(triples, entity2id, relation2id, args.cuda)
-    dataloader = DataLoader(dataset, batch_size=args.bs, shuffle=True)
+        file_triples = read_triple(os.path.join(args.data_path, file_name), entity2id, relation2id)
+        total_triples += len(file_triples)
+        positive_triples.extend(file_triples)
+
+    positive_tails_by_hr = build_positive_tails_by_hr(positive_triples)
+    total_training_samples = 0
+    for file_name in train_files:
+        file_triples = read_triple(os.path.join(args.data_path, file_name), entity2id, relation2id)
+        dataset = MyDataset(
+            file_triples,
+            entity2id,
+            relation2id,
+            args.cuda,
+            negative_ratio=args.negative_ratio,
+            relation_id_to_name=relation_id_to_name,
+            entity_id_to_name=entity_id_to_name,
+            tail_candidates_by_type=tail_candidates_by_type,
+            positive_tails_by_hr=positive_tails_by_hr,
+            seed=args.seed,
+        )
+        dataloader = DataLoader(dataset, batch_size=args.bs, shuffle=True)
+        triple_groups.append((file_name, dataloader, len(file_triples)))
+        total_training_samples += len(dataset)
 
     model = ConvE(args, nentity, nrelation)
     if args.cuda:
@@ -326,6 +448,13 @@ def main():
                 best_loss = float(last_loss)
                 best_epoch = start_epoch
             logging.info(f"Resumed ConvE from {checkpoint_path}, start_epoch={start_epoch}, last_loss={last_loss}")
+            best_checkpoint_path = os.path.join(args.save_path, "best.pt")
+            if os.path.exists(best_checkpoint_path):
+                best_checkpoint = torch_load_file(best_checkpoint_path, map_location=None if args.cuda else torch.device("cpu"))
+                if best_checkpoint.get("loss") is not None:
+                    best_loss = float(best_checkpoint["loss"])
+                    best_epoch = int(best_checkpoint.get("epoch") or best_epoch)
+                logging.info(f"Existing best ConvE checkpoint: epoch={best_epoch}, loss={best_loss}")
         else:
             logging.info(f"--resume requested but {checkpoint_path} does not exist; starting from scratch.")
 
@@ -339,17 +468,22 @@ def main():
     logging.info(f'hidden_drop = {args.hidden_drop}')
     logging.info(f'feat_drop = {args.feat_drop}')
     logging.info(f'training_triple_files = {train_files}')
-    logging.info(f'train_triples = {len(triples)}')
+    logging.info(f'positive_train_triples = {total_triples}')
+    logging.info(f'negative_ratio = {args.negative_ratio}')
+    logging.info(f'total_training_samples = {total_training_samples}')
 
     training_start = time.perf_counter()
     for epoch in range(start_epoch, args.epochs):
         epoch_loss = 0
-        for h, r, t in tqdm(dataloader):
-            label = torch.ones(len(h), device=h.device)
-            loss = train_step(model, h, r, t, label, optimizer, args.cuda)
-            epoch_loss += loss
+        batch_count = 0
+        for file_name, dataloader, _ in triple_groups:
+            logging.info(f"Epoch {epoch + 1}: training on {file_name}")
+            for h, r, t, label in tqdm(dataloader):
+                loss = train_step(model, h, r, t, label, optimizer, args.cuda)
+                epoch_loss += loss
+                batch_count += 1
 
-        avg_loss = epoch_loss / max(1, len(dataloader))
+        avg_loss = epoch_loss / max(1, batch_count)
         save_model(model, optimizer, args, epoch=epoch + 1, loss=avg_loss, checkpoint_name="last.pt")
         if avg_loss < best_loss:
             best_loss = avg_loss
@@ -374,8 +508,11 @@ def main():
             "hidden_drop": args.hidden_drop,
             "feat_drop": args.feat_drop,
             "training_triple_files": train_files,
-            "train_triples": len(triples),
+            "positive_train_triples": total_triples,
+            "negative_ratio": args.negative_ratio,
+            "total_training_samples": total_training_samples,
             "include_test_triples": args.include_test_triples,
+            "best_model_file": "best_model.pth",
         },
         args.metrics_file,
     )

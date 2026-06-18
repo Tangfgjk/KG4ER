@@ -111,6 +111,7 @@ def parse_args():
     parser.add_argument("--explain-output-dir", default=None)
     parser.add_argument("--skip-explanations", action="store_true")
     parser.add_argument("--timing-file", default=None)
+    parser.add_argument("--checkpoint", choices=["best", "last"], default="best")
     parser.add_argument(
         "--scores-only",
         action="store_true",
@@ -140,22 +141,45 @@ def torch_load_file(path, map_location=None):
         return torch.load(fp, map_location=map_location)
 
 
+def resolve_conve_artifacts(embedding_path, checkpoint="best"):
+    if checkpoint == "best":
+        best_model = os.path.join(embedding_path, "best_model.pth")
+        best_entity = os.path.join(embedding_path, "best_entity_embedding.npy")
+        best_relation = os.path.join(embedding_path, "best_relation_embedding.npy")
+        if os.path.exists(best_model) and os.path.exists(best_entity) and os.path.exists(best_relation):
+            return best_model, best_entity, best_relation, "best"
+        print("Best ConvE artifacts not found; falling back to last model artifacts.")
+
+    return (
+        os.path.join(embedding_path, "model.pth"),
+        os.path.join(embedding_path, "entity_embedding.npy"),
+        os.path.join(embedding_path, "relation_embedding.npy"),
+        "last",
+    )
+
+
 args = parse_args()
 dataset = args.dataset
 type = args.model_type
 
 dict_path = args.data_path or f"../data/{dataset}"
 embedding_path = args.embedding_path or f"./models/{dataset}/{type}"
+model_file, entity_embedding_file, relation_embedding_file, checkpoint_used = resolve_conve_artifacts(
+    embedding_path,
+    checkpoint=args.checkpoint,
+)
 
-relation_embedding = np.load(f"{embedding_path}/relation_embedding.npy")
-entity_embedding = np.load(f"{embedding_path}/entity_embedding.npy")
+relation_embedding = np.load(relation_embedding_file)
+entity_embedding = np.load(entity_embedding_file)
 # 将自定义类加入白名单
 if add_safe_globals is not None:
     add_safe_globals([
         ConvE, nn.Embedding, nn.BatchNorm1d, nn.BatchNorm2d,
         nn.Conv2d, nn.Linear, nn.Dropout, nn.Dropout2d
     ])
-convE_model = torch_load_file(f'{embedding_path}/model.pth', map_location=torch.device('cpu'))
+convE_model = torch_load_file(model_file, map_location=torch.device('cpu'))
+convE_model.eval()
+print(f"Loaded ConvE checkpoint: {checkpoint_used} ({model_file})")
 # convE_model = convE_model.cuda()
 
 ### read Q-matrix, entities, relations
