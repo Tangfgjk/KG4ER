@@ -35,7 +35,7 @@ def test_conve_test_triples_can_be_excluded_for_diagnostics():
     assert training_triple_files(args) == ["triples.txt"]
 
 
-def test_conve_negative_sampling_is_type_constrained_and_filtered():
+def test_conve_negative_sampling_is_applied_only_to_rec_triples():
     entity2id = {"uid0": 0, "uid1": 1, "ex0": 2, "ex1": 3, "kc0": 4}
     relation2id = {"rec": 0, "mlkc0.50": 1}
     id2entity = {value: key for key, value in entity2id.items()}
@@ -43,6 +43,7 @@ def test_conve_negative_sampling_is_type_constrained_and_filtered():
     positive_triples = [
         (entity2id["uid0"], relation2id["rec"], entity2id["ex0"]),
         (entity2id["kc0"], relation2id["mlkc0.50"], entity2id["uid0"]),
+        (entity2id["kc0"], relation2id["mlkc0.50"], entity2id["uid1"]),
     ]
     dataset = MyDataset(
         positive_triples,
@@ -57,14 +58,16 @@ def test_conve_negative_sampling_is_type_constrained_and_filtered():
         seed=2024,
     )
 
+    assert len(dataset) == 4
+
     _, rec_relation, rec_tail, rec_label = dataset[1]
-    _, mlkc_relation, mlkc_tail, mlkc_label = dataset[3]
+    _, mlkc_relation, mlkc_tail, mlkc_label = dataset[2]
 
     assert rec_label.item() == 0.0
-    assert mlkc_label.item() == 0.0
+    assert mlkc_label.item() == 1.0
     assert rec_relation.item() == relation2id["rec"]
     assert id2entity[rec_tail.item()].startswith("ex")
     assert rec_tail.item() != entity2id["ex0"]
     assert mlkc_relation.item() == relation2id["mlkc0.50"]
     assert id2entity[mlkc_tail.item()].startswith("uid")
-    assert mlkc_tail.item() != entity2id["uid0"]
+    assert mlkc_tail.item() == entity2id["uid0"]

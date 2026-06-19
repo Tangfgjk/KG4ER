@@ -133,6 +133,10 @@ def relation_tail_type(relation_name):
     return None
 
 
+def relation_uses_negative_sampling(relation_name):
+    return relation_name == "rec"
+
+
 def build_tail_candidates(entity2id):
     candidates = {"uid": [], "ex": [], "kc": []}
     for entity_name, entity_id in entity2id.items():
@@ -173,9 +177,23 @@ class MyDataset(Dataset):
         self.tail_candidates_by_type = tail_candidates_by_type or {}
         self.positive_tails_by_hr = positive_tails_by_hr or {}
         self.seed = 0 if seed is None else int(seed)
+        self.sample_index = self.build_sample_index()
+
+    def should_sample_negative(self, relation_id):
+        relation_name = self.relation_id_to_name.get(relation_id, "")
+        return relation_uses_negative_sampling(relation_name) or relation_id == self.relation2id.get("rec")
+
+    def build_sample_index(self):
+        sample_index = []
+        for triple_idx, (_, relation_id, _) in enumerate(self.triples):
+            sample_index.append((triple_idx, 0))
+            if self.should_sample_negative(relation_id):
+                for negative_idx in range(1, self.negative_ratio + 1):
+                    sample_index.append((triple_idx, negative_idx))
+        return sample_index
 
     def __len__(self):
-        return len(self.triples) * (1 + self.negative_ratio)
+        return len(self.sample_index)
 
     def sample_negative_tail(self, h, r, positive_tail, sample_idx):
         relation_name = self.relation_id_to_name.get(r, "")
@@ -197,9 +215,7 @@ class MyDataset(Dataset):
         return eligible[rng.randrange(len(eligible))]
 
     def __getitem__(self, idx):
-        group_size = 1 + self.negative_ratio
-        triple_idx = idx // group_size
-        offset = idx % group_size
+        triple_idx, offset = self.sample_index[idx]
         h, r, t = self.triples[triple_idx]
         label = 1.0
         if offset != 0:
