@@ -68,7 +68,7 @@ def parse_args(argv=None):
     parser.add_argument("--resume", action="store_true", help="Resume latest run for this dataset unless --run-id is given.")
     parser.add_argument("--seeds", default="2024,2025,2026,2027,2028")
     parser.add_argument("--cuda", default="auto", choices=["auto", "true", "false"])
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--conve-batch-size", type=int, default=1024)
     parser.add_argument("--conve-learning-rate", type=float, default=0.001)
     parser.add_argument("--conve-input-drop", type=float, default=0.2)

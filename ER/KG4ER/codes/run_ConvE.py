@@ -20,7 +20,7 @@ class Args:
     def __init__(self, parsed_args=None):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.bs = 1024
-        self.epochs = 10
+        self.epochs = 25
         self.learning_rate = 0.001
         self.cuda = True
         self.data_path = os.path.abspath(os.path.join(base_dir, '..', 'data', 'Eedi'))

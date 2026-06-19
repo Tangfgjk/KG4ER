@@ -20,7 +20,7 @@ from run_ConvE import (
 def test_conve_defaults_match_original_protocol():
     args = Args()
 
-    assert args.epochs == 10
+    assert args.epochs == 25
     assert args.input_drop == 0.2
     assert args.hidden_drop == 0.2
     assert args.feat_drop == 0.3

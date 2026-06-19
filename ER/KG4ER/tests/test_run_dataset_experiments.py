@@ -22,7 +22,7 @@ def test_transe_adv_experiment_uses_transe_with_adversarial_sampling():
 def test_one_click_conve_defaults_match_original_protocol():
     args = parse_args(["--dataset", "Eedi"])
 
-    assert args.epochs == 10
+    assert args.epochs == 25
     assert args.conve_input_drop == 0.2
     assert args.conve_hidden_drop == 0.2
     assert args.conve_feat_drop == 0.3
