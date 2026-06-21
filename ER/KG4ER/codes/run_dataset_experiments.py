@@ -2,7 +2,6 @@ import argparse
 import csv
 import json
 import os
-import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -10,6 +9,7 @@ from pathlib import Path
 from statistics import mean, stdev
 
 from experiment_utils import load_json, write_json
+from conve_ablation_data import CONVE_VARIANTS, prepare_conve_variant_data_dir
 
 
 CODE_DIR = Path(__file__).resolve().parent
@@ -39,12 +39,7 @@ REQUIRED_DATA_FILES = [
     "relations.dict",
 ]
 
-CONVE_EXPERIMENTS = {
-    "ConvE_full": None,
-    "ConvE_no_seq": "pkc",
-    "ConvE_no_forgetting": "exfr",
-    "ConvE_no_mastery": "mlkc",
-}
+CONVE_EXPERIMENTS = CONVE_VARIANTS
 
 KGE_EXPERIMENTS = {
     "TransE": {"model": "TransE", "args": []},
@@ -75,6 +70,12 @@ def parse_args(argv=None):
     parser.add_argument("--conve-hidden-drop", type=float, default=0.2)
     parser.add_argument("--conve-feat-drop", type=float, default=0.3)
     parser.add_argument("--conve-negative-ratio", type=int, default=5)
+    parser.add_argument(
+        "--conve-rec-top-k",
+        type=int,
+        default=10,
+        help="Number of independently generated positive rec triples per training learner for each ConvE variant.",
+    )
     parser.add_argument(
         "--conve-include-test-triples",
         dest="conve_include_test_triples",
@@ -208,28 +209,6 @@ def run_command(command, cwd, log_path, dry_run=False):
         completed = subprocess.run(command, cwd=cwd, stdout=log, stderr=subprocess.STDOUT)
         log.write(f"\nreturncode={completed.returncode}\n")
         return completed.returncode
-
-
-def copy_if_needed(src, dst):
-    if not dst.exists():
-        shutil.copy2(src, dst)
-
-
-def create_ablation_data_dir(source_dir, target_dir, remove_relation_prefix):
-    target_dir.mkdir(parents=True, exist_ok=True)
-    for name in ["Q.txt", "entities.dict", "relations.dict", "stu2know_mastery.json", "stu2know_seq.json", "stu2know_forget.json", "stu2ex_forget.json"]:
-        copy_if_needed(source_dir / name, target_dir / name)
-    for triple_name in ["triples.txt", "test_triples.txt"]:
-        src = source_dir / triple_name
-        dst = target_dir / triple_name
-        if dst.exists():
-            continue
-        with src.open("r", encoding="utf-8") as fin, dst.open("w", encoding="utf-8") as fout:
-            for line in fin:
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) == 3 and parts[1].startswith(remove_relation_prefix):
-                    continue
-                fout.write(line)
 
 
 def experiment_filter(args):
@@ -584,6 +563,8 @@ def write_manifest(args, batch_dir, data_dir, use_cuda, seeds):
             "hidden_drop": args.conve_hidden_drop,
             "feat_drop": args.conve_feat_drop,
             "negative_ratio": args.conve_negative_ratio,
+            "rec_top_k": args.conve_rec_top_k,
+            "variant_formulas": CONVE_EXPERIMENTS,
             "include_test_triples": args.conve_include_test_triples,
         },
         "kge_experiments": list(KGE_EXPERIMENTS.keys()),
@@ -613,13 +594,17 @@ def main():
     write_manifest(args, batch_dir, data_dir, use_cuda, seeds)
 
     variant_root = batch_dir / "data_variants"
-    data_variants = {"ConvE_full": data_dir}
-    for experiment_name, remove_prefix in CONVE_EXPERIMENTS.items():
-        if remove_prefix is None:
-            continue
+    data_variants = {}
+    for experiment_name in CONVE_EXPERIMENTS:
         variant_dir = variant_root / experiment_name
         if wanted(experiment_name, selected):
-            create_ablation_data_dir(data_dir, variant_dir, remove_prefix)
+            prepare_conve_variant_data_dir(
+                data_dir,
+                variant_dir,
+                experiment_name,
+                top_k_rec=args.conve_rec_top_k,
+                resume=args.resume,
+            )
         data_variants[experiment_name] = variant_dir
 
     for experiment_name in CONVE_EXPERIMENTS:

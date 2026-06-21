@@ -7,7 +7,27 @@ CODES = ROOT / "ER" / "KG4ER" / "codes"
 sys.path.insert(0, str(CODES))
 
 
-from run_dataset_experiments import KGE_EXPERIMENTS, parse_args
+from run_dataset_experiments import CONVE_EXPERIMENTS, KGE_EXPERIMENTS, parse_args
+
+
+def test_conve_experiment_definitions_use_end_to_end_term_combinations():
+    assert CONVE_EXPERIMENTS["ConvE_full"]["active_terms"] == (
+        "mastery",
+        "sequence",
+        "forgetting",
+    )
+    assert CONVE_EXPERIMENTS["ConvE_no_mastery"]["active_terms"] == (
+        "sequence",
+        "forgetting",
+    )
+    assert CONVE_EXPERIMENTS["ConvE_no_forgetting"]["active_terms"] == (
+        "mastery",
+        "sequence",
+    )
+    assert CONVE_EXPERIMENTS["ConvE_no_seq"]["active_terms"] == (
+        "mastery",
+        "forgetting",
+    )
 
 
 def test_transe_adv_experiment_uses_transe_with_adversarial_sampling():
@@ -27,6 +47,7 @@ def test_one_click_conve_defaults_match_original_protocol():
     assert args.conve_hidden_drop == 0.2
     assert args.conve_feat_drop == 0.3
     assert args.conve_negative_ratio == 5
+    assert args.conve_rec_top_k == 10
     assert args.conve_include_test_triples is True
 
 
