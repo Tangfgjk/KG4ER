@@ -23,6 +23,8 @@ EL/
 
 # Documents not intended for this GitHub repo
 ER/docs/
+ER/docs-for-git/
+ER/论文修改回复/
 *.pdf
 
 # Model/data artifacts
@@ -43,4 +45,5 @@ ER/docs/
 *.tsv
 *.txt
 !README.md
+!ER/KG4ER/requirements.txt
 !ER/KG4ER/codes/run.sh
